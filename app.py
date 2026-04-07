@@ -9,10 +9,10 @@ app = Flask(__name__)
 W, H = 1080, 1350
 
 # ─── FONTES ──────────────────────────────────────────────────────────────────
-FONT_PATH = "/usr/share/fonts/truetype/dejavu/"
+FONT_PATH = "/usr/share/fonts/truetype/poppins/"
 
 def font(bold=False, size=48):
-    name = "DejaVuSans-Bold.ttf" if bold else "DejaVuSans.ttf"
+    name = "Poppins-ExtraBold.ttf" if bold else "Poppins-Regular.ttf"
     try:
         return ImageFont.truetype(os.path.join(FONT_PATH, name), size)
     except:
