@@ -204,7 +204,7 @@ def slide_capa(data):
     sub_h    = measure_rich(sub, 44, 44, max_w) + 50 if sub else 0
 
     total_h = tag_h + titulo_h + sub_h
-    cy = (H - total_h) // 2
+    cy = H - total_h - 200
 
     if tag:
         f_tag = font(True, 30)
