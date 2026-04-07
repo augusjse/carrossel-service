@@ -1,180 +1,212 @@
 from flask import Flask, request, jsonify, send_file
 from PIL import Image, ImageDraw, ImageFont
-import io
-import zipfile
-import os
-import textwrap
+import io, zipfile, os
+import requests as http_requests
 
 app = Flask(__name__)
 
-# ─── CONFIGURAÇÕES VISUAIS ───────────────────────────────────────────────────
-W, H = 1080, 1080
+# ─── DIMENSÕES ───────────────────────────────────────────────────────────────
+W, H = 1080, 1350
+
+# ─── FONTES ──────────────────────────────────────────────────────────────────
 FONT_PATH = "/usr/share/fonts/truetype/dejavu/"
 
-# Paleta
-COLOR_BG       = "#FFFFFF"
-COLOR_BG_CAPA  = "#0D0D0D"
-COLOR_BG_CTA   = "#1A1A2E"
-COLOR_ACCENT   = "#FF3C5F"
-COLOR_TEXT     = "#1A1A1A"
-COLOR_TEXT_INV = "#FFFFFF"
-COLOR_MUTED    = "#888888"
-COLOR_NUM      = "#F0F0F0"
-
-def hex_to_rgb(h):
-    h = h.lstrip("#")
-    return tuple(int(h[i:i+2], 16) for i in (0, 2, 4))
-
-def load_font(name, size):
+def font(bold=False, size=48):
+    name = "DejaVuSans-Bold.ttf" if bold else "DejaVuSans.ttf"
     try:
         return ImageFont.truetype(os.path.join(FONT_PATH, name), size)
     except:
         return ImageFont.load_default()
 
-def draw_multiline(draw, text, x, y, font, color, max_width, line_spacing=1.3):
-    words = text.split()
-    lines = []
-    current = ""
-    for word in words:
-        test = f"{current} {word}".strip()
-        bbox = draw.textbbox((0, 0), test, font=font)
-        if bbox[2] - bbox[0] <= max_width:
-            current = test
-        else:
-            if current:
-                lines.append(current)
-            current = word
-    if current:
-        lines.append(current)
+# ─── CORES ───────────────────────────────────────────────────────────────────
+TEXT_DARK    = (20, 20, 20)
+TEXT_REGULAR = (50, 50, 50)
+TEXT_MUTED   = (160, 160, 160)
+ACCENT       = (180, 145, 60)
+BG_CAPA      = (15, 15, 15)
 
-    line_h = draw.textbbox((0, 0), "A", font=font)[3] * line_spacing
-    for i, line in enumerate(lines):
-        draw.text((x, y + i * line_h), line, font=font, fill=color)
-    return y + len(lines) * line_h
+# ─── ZONA DE TEXTO DO TEMPLATE ───────────────────────────────────────────────
+# O template tem header ~160px e rodapé ~170px
+TEXT_ZONE_TOP    = 190   # onde o texto começa
+TEXT_ZONE_BOTTOM = 1170  # onde o texto termina (antes do handle)
+TEXT_ZONE_LEFT   = 80
+TEXT_ZONE_RIGHT  = W - 80
 
-def add_accent_bar(draw, x, y, width=60, height=6, color=COLOR_ACCENT):
-    draw.rectangle([x, y, x + width, y + height], fill=hex_to_rgb(color))
+# ─── TEMPLATE BASE ───────────────────────────────────────────────────────────
+TEMPLATE_PATH = os.path.join(os.path.dirname(__file__), "template.jpg")
 
-def add_handle(draw, handle, font, color):
-    if handle:
-        bbox = draw.textbbox((0, 0), handle, font=font)
-        tw = bbox[2] - bbox[0]
-        draw.text((W - tw - 60, H - 60), handle, font=font, fill=color)
+def load_template(url=None):
+    """Carrega template do disco ou de uma URL. Retorna PIL Image."""
+    if url and url.strip():
+        try:
+            resp = http_requests.get(url.strip(), timeout=10)
+            resp.raise_for_status()
+            img = Image.open(io.BytesIO(resp.content)).convert("RGB")
+            return img.resize((W, H), Image.LANCZOS)
+        except:
+            pass  # fallback para template local
+    if os.path.exists(TEMPLATE_PATH):
+        return Image.open(TEMPLATE_PATH).convert("RGB").resize((W, H), Image.LANCZOS)
+    # Último fallback: branco puro
+    return Image.new("RGB", (W, H), (255, 255, 255))
+
+# ─── UTILITÁRIOS DE TEXTO ────────────────────────────────────────────────────
+
+def draw_rich_text(draw, text, x, y, size_reg=52, size_bold=52,
+                   color_reg=None, color_bold=None, max_w=None):
+    """
+    Renderiza texto com suporte a **bold** e quebras de linha \\n.
+    Retorna y final (após o último caractere desenhado).
+    """
+    if color_reg  is None: color_reg  = TEXT_REGULAR
+    if color_bold is None: color_bold = TEXT_DARK
+    if max_w      is None: max_w      = TEXT_ZONE_RIGHT - x
+
+    line_h = int(font(False, size_reg).getbbox("A")[3] * 1.55)
+    cy = y
+
+    for para in text.split("\n"):
+        if para.strip() == "":
+            cy += int(line_h * 0.55)
+            continue
+
+        # Parse **bold**
+        tokens = []
+        rem = para
+        while "**" in rem:
+            idx = rem.index("**")
+            if idx > 0:
+                tokens.append((rem[:idx], False))
+            rem = rem[idx+2:]
+            end = rem.index("**") if "**" in rem else len(rem)
+            tokens.append((rem[:end], True))
+            rem = rem[end+2:] if "**" in rem else ""
+        if rem:
+            tokens.append((rem, False))
+        if not tokens:
+            tokens = [(para, False)]
+
+        # Tokeniza palavras
+        words = []
+        for txt, bold in tokens:
+            for w in txt.split(" "):
+                if w:
+                    words.append((w, bold))
+
+        # Word-wrap
+        lines, cur, cw = [], [], 0
+        for word, bold in words:
+            f = font(bold, size_bold if bold else size_reg)
+            bw = draw.textbbox((0,0), word+" ", font=f)[2]
+            if cw + bw > max_w and cur:
+                lines.append(cur); cur = [(word,bold)]; cw = bw
+            else:
+                cur.append((word,bold)); cw += bw
+        if cur:
+            lines.append(cur)
+
+        # Renderiza linhas
+        for line in lines:
+            cx = x
+            for word, bold in line:
+                f = font(bold, size_bold if bold else size_reg)
+                color = color_bold if bold else color_reg
+                draw.text((cx, cy), word+" ", font=f, fill=color)
+                cx += draw.textbbox((0,0), word+" ", font=f)[2]
+            cy += line_h
+        cy += int(line_h * 0.1)
+
+    return cy
 
 # ─── SLIDES ──────────────────────────────────────────────────────────────────
 
 def slide_capa(data):
-    img = Image.new("RGB", (W, H), hex_to_rgb(COLOR_BG_CAPA))
+    imagem_url = data.get("imagem_url", "").strip()
+
+    if imagem_url:
+        try:
+            resp = http_requests.get(imagem_url, timeout=10)
+            resp.raise_for_status()
+            bg = Image.open(io.BytesIO(resp.content)).convert("RGBA")
+            ratio = max(W / bg.width, H / bg.height)
+            nw, nh = int(bg.width*ratio), int(bg.height*ratio)
+            bg = bg.resize((nw, nh), Image.LANCZOS)
+            l, t = (nw-W)//2, (nh-H)//2
+            bg = bg.crop((l, t, l+W, t+H))
+            img = bg.convert("RGBA")
+            ov = Image.new("RGBA", (W,H), (0,0,0,0))
+            d = ImageDraw.Draw(ov)
+            for yy in range(H):
+                alpha = int(min(215, (yy/H)*270))
+                d.line([(0,yy),(W,yy)], fill=(0,0,0,alpha))
+            img = Image.alpha_composite(img, ov).convert("RGB")
+        except:
+            img = Image.new("RGB", (W, H), BG_CAPA)
+    else:
+        img = Image.new("RGB", (W, H), BG_CAPA)
+
     draw = ImageDraw.Draw(img)
+    inv = True
+    tc = (255,255,255); ts = (210,210,210); acc = (255,200,80) if imagem_url else ACCENT
 
-    # Accent top bar
-    draw.rectangle([0, 0, W, 10], fill=hex_to_rgb(COLOR_ACCENT))
-
-    # Etiqueta (tag)
-    tag = data.get("tag", "").upper()
+    tag = data.get("tag","").upper()
     if tag:
-        font_tag = load_font("DejaVuSans-Bold.ttf", 28)
-        draw.text((80, 120), tag, font=font_tag, fill=hex_to_rgb(COLOR_ACCENT))
+        draw.text((TEXT_ZONE_LEFT, 130), tag, font=font(True,30), fill=acc)
 
-    # Título principal
-    titulo = data.get("titulo", "")
-    font_titulo = load_font("DejaVuSans-Bold.ttf", 88)
-    draw_multiline(draw, titulo, 80, 200, font_titulo, hex_to_rgb(COLOR_TEXT_INV), W - 160, 1.2)
+    y = draw_rich_text(draw, data.get("titulo",""),
+                       TEXT_ZONE_LEFT, 230,
+                       size_reg=82, size_bold=82,
+                       color_reg=tc, color_bold=tc,
+                       max_w=W - TEXT_ZONE_LEFT*2)
 
-    # Subtítulo
-    sub = data.get("subtitulo", "")
+    sub = data.get("subtitulo","")
     if sub:
-        font_sub = load_font("DejaVuSans.ttf", 42)
-        draw_multiline(draw, sub, 80, 700, font_sub, hex_to_rgb(COLOR_MUTED), W - 160, 1.4)
-
-    # Accent bottom bar
-    add_accent_bar(draw, 80, H - 130)
+        draw_rich_text(draw, sub,
+                       TEXT_ZONE_LEFT, y+50,
+                       size_reg=44, size_bold=44,
+                       color_reg=ts, color_bold=ts,
+                       max_w=W - TEXT_ZONE_LEFT*2)
 
     # Handle
-    add_handle(draw, data.get("handle", ""), load_font("DejaVuSans.ttf", 26), hex_to_rgb(COLOR_MUTED))
+    handle = data.get("handle","")
+    if handle:
+        f = font(False, 30)
+        bw = draw.textbbox((0,0), handle, font=f)[2]
+        draw.text((W//2 - bw//2, H-80), handle, font=f, fill=(180,180,180))
 
     return img
 
 
 def slide_conteudo(data):
-    img = Image.new("RGB", (W, H), hex_to_rgb(COLOR_BG))
+    template_url = data.get("layout_url", "")
+    img = load_template(template_url)
     draw = ImageDraw.Draw(img)
 
-    # Número do slide ao fundo (decorativo)
-    numero = data.get("numero", "")
-    if numero:
-        font_num = load_font("DejaVuSans-Bold.ttf", 380)
-        bbox = draw.textbbox((0, 0), numero, font=font_num)
-        nw = bbox[2] - bbox[0]
-        draw.text((W - nw - 20, H - 360), numero, font=font_num, fill=hex_to_rgb(COLOR_NUM))
-
-    # Accent bar
-    add_accent_bar(draw, 80, 100)
-
-    # Título
-    titulo = data.get("titulo", "")
-    font_titulo = load_font("DejaVuSans-Bold.ttf", 72)
-    y = draw_multiline(draw, titulo, 80, 140, font_titulo, hex_to_rgb(COLOR_TEXT), W - 200, 1.25)
-
-    # Texto
-    texto = data.get("texto", "")
-    if texto:
-        font_texto = load_font("DejaVuSans.ttf", 46)
-        draw_multiline(draw, texto, 80, y + 60, font_texto, hex_to_rgb(COLOR_TEXT), W - 160, 1.6)
-
-    # Handle
-    add_handle(draw, data.get("handle", ""), load_font("DejaVuSans.ttf", 26), hex_to_rgb(COLOR_MUTED))
-
+    draw_rich_text(draw, data.get("texto",""),
+                   TEXT_ZONE_LEFT, TEXT_ZONE_TOP,
+                   size_reg=52, size_bold=52,
+                   color_reg=TEXT_REGULAR, color_bold=TEXT_DARK,
+                   max_w=TEXT_ZONE_RIGHT - TEXT_ZONE_LEFT)
     return img
 
 
 def slide_cta(data):
-    img = Image.new("RGB", (W, H), hex_to_rgb(COLOR_BG_CTA))
+    template_url = data.get("layout_url", "")
+    img = load_template(template_url)
     draw = ImageDraw.Draw(img)
 
-    # Accent bar topo
-    draw.rectangle([0, 0, W, 10], fill=hex_to_rgb(COLOR_ACCENT))
-
-    # Ícone / label
-    label = data.get("label", "GOSTOU?").upper()
-    font_label = load_font("DejaVuSans-Bold.ttf", 32)
-    draw.text((80, 160), label, font=font_label, fill=hex_to_rgb(COLOR_ACCENT))
-
-    # Título CTA
-    titulo = data.get("titulo", "")
-    font_titulo = load_font("DejaVuSans-Bold.ttf", 78)
-    y = draw_multiline(draw, titulo, 80, 240, font_titulo, hex_to_rgb(COLOR_TEXT_INV), W - 160, 1.2)
-
-    # Botão / instrução
-    cta = data.get("cta", "")
-    if cta:
-        # Caixa do botão
-        pad_x, pad_y = 50, 25
-        font_cta = load_font("DejaVuSans-Bold.ttf", 44)
-        bbox = draw.textbbox((0, 0), cta, font=font_cta)
-        bw = bbox[2] - bbox[0] + pad_x * 2
-        bh = bbox[3] - bbox[1] + pad_y * 2
-        bx, by = 80, y + 80
-        draw.rounded_rectangle([bx, by, bx + bw, by + bh], radius=12, fill=hex_to_rgb(COLOR_ACCENT))
-        draw.text((bx + pad_x, by + pad_y), cta, font=font_cta, fill=hex_to_rgb(COLOR_TEXT_INV))
-
-    # Handle
-    add_handle(draw, data.get("handle", ""), load_font("DejaVuSans.ttf", 26), hex_to_rgb(COLOR_MUTED))
-
+    draw_rich_text(draw, data.get("texto",""),
+                   TEXT_ZONE_LEFT, TEXT_ZONE_TOP,
+                   size_reg=52, size_bold=52,
+                   color_reg=TEXT_REGULAR, color_bold=TEXT_DARK,
+                   max_w=TEXT_ZONE_RIGHT - TEXT_ZONE_LEFT)
     return img
 
-# ─── ROTEADOR DE TIPOS ───────────────────────────────────────────────────────
 
-SLIDE_RENDERERS = {
-    "capa":     slide_capa,
-    "conteudo": slide_conteudo,
-    "cta":      slide_cta,
-}
+RENDERERS = {"capa": slide_capa, "conteudo": slide_conteudo, "cta": slide_cta}
 
-def render_slide(slide_data):
-    tipo = slide_data.get("tipo", "conteudo")
-    renderer = SLIDE_RENDERERS.get(tipo, slide_conteudo)
-    return renderer(slide_data)
+def render_slide(data):
+    return RENDERERS.get(data.get("tipo","conteudo"), slide_conteudo)(data)
 
 # ─── ENDPOINTS ───────────────────────────────────────────────────────────────
 
@@ -189,44 +221,31 @@ def gerar():
     if not body or "slides" not in body:
         return jsonify({"erro": "Campo 'slides' obrigatório"}), 400
 
-    slides = body["slides"][:10]  # máximo 10 lâminas
-    handle = body.get("handle", "")
-
-    # Injeta handle em cada slide se não vier explícito
+    slides = body["slides"][:10]
+    handle = body.get("handle","")
     for s in slides:
         if "handle" not in s:
             s["handle"] = handle
 
-    images = []
-    for slide in slides:
-        img = render_slide(slide)
-        buf = io.BytesIO()
-        img.save(buf, format="PNG", optimize=True)
-        buf.seek(0)
-        images.append(buf)
-
-    # ZIP com todos os PNGs
     zip_buf = io.BytesIO()
     with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        for i, img_buf in enumerate(images):
-            zf.writestr(f"slide_{i+1:02d}.png", img_buf.read())
+        for i, slide in enumerate(slides):
+            img = render_slide(slide)
+            buf = io.BytesIO()
+            img.save(buf, format="PNG", optimize=True)
+            buf.seek(0)
+            zf.writestr(f"slide_{i+1:02d}.png", buf.read())
     zip_buf.seek(0)
 
-    return send_file(
-        zip_buf,
-        mimetype="application/zip",
-        as_attachment=True,
-        download_name="carrossel.zip"
-    )
+    return send_file(zip_buf, mimetype="application/zip",
+                     as_attachment=True, download_name="carrossel.zip")
 
 
 @app.route("/slide", methods=["POST"])
 def slide_unico():
-    """Gera um único slide. Útil para preview."""
     body = request.get_json()
     if not body:
         return jsonify({"erro": "Body JSON obrigatório"}), 400
-
     img = render_slide(body)
     buf = io.BytesIO()
     img.save(buf, format="PNG")
