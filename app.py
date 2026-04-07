@@ -2,11 +2,8 @@ from flask import Flask, request, jsonify, send_file
 from PIL import Image, ImageDraw, ImageFont
 import io, zipfile, os
 import requests as http_requests
-from flask_cors import CORS
 
 app = Flask(__name__)
-
-CORS(app)
 
 # ─── DIMENSÕES ───────────────────────────────────────────────────────────────
 W, H = 1080, 1350
@@ -55,11 +52,20 @@ def load_template(url=None):
 
 # ─── UTILITÁRIOS DE TEXTO ────────────────────────────────────────────────────
 
+def line_width(draw, parts, size_reg, size_bold):
+    """Calcula largura total de uma linha de partes (word, bold)."""
+    total = 0
+    for word, bold in parts:
+        f = font(bold, size_bold if bold else size_reg)
+        total += draw.textbbox((0,0), word+" ", font=f)[2]
+    return total
+
 def draw_rich_text(draw, text, x, y, size_reg=52, size_bold=52,
-                   color_reg=None, color_bold=None, max_w=None):
+                   color_reg=None, color_bold=None, max_w=None, center=False):
     """
     Renderiza texto com suporte a **bold** e quebras de linha \\n.
-    Retorna y final (após o último caractere desenhado).
+    Se center=True, centraliza cada linha dentro de max_w.
+    Retorna y final.
     """
     if color_reg  is None: color_reg  = TEXT_REGULAR
     if color_bold is None: color_bold = TEXT_DARK
@@ -110,7 +116,8 @@ def draw_rich_text(draw, text, x, y, size_reg=52, size_bold=52,
 
         # Renderiza linhas
         for line in lines:
-            cx = x
+            lw = line_width(draw, line, size_reg, size_bold)
+            cx = x + (max_w - lw) // 2 if center else x
             for word, bold in line:
                 f = font(bold, size_bold if bold else size_reg)
                 color = color_bold if bold else color_reg
@@ -154,13 +161,16 @@ def slide_capa(data):
 
     tag = data.get("tag","").upper()
     if tag:
-        draw.text((TEXT_ZONE_LEFT, 130), tag, font=font(True,30), fill=acc)
+        f_tag = font(True, 30)
+        tag_w = draw.textbbox((0,0), tag, font=f_tag)[2]
+        draw.text((W//2 - tag_w//2, 130), tag, font=f_tag, fill=acc)
 
     y = draw_rich_text(draw, data.get("titulo",""),
                        TEXT_ZONE_LEFT, 230,
                        size_reg=82, size_bold=82,
                        color_reg=tc, color_bold=tc,
-                       max_w=W - TEXT_ZONE_LEFT*2)
+                       max_w=W - TEXT_ZONE_LEFT*2,
+                       center=True)
 
     sub = data.get("subtitulo","")
     if sub:
@@ -168,7 +178,8 @@ def slide_capa(data):
                        TEXT_ZONE_LEFT, y+50,
                        size_reg=44, size_bold=44,
                        color_reg=ts, color_bold=ts,
-                       max_w=W - TEXT_ZONE_LEFT*2)
+                       max_w=W - TEXT_ZONE_LEFT*2,
+                       center=True)
 
     # Handle
     handle = data.get("handle","")
