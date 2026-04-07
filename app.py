@@ -2,8 +2,11 @@ from flask import Flask, request, jsonify, send_file
 from PIL import Image, ImageDraw, ImageFont
 import io, zipfile, os
 import requests as http_requests
+from flask_cors import CORS
 
 app = Flask(__name__)
+
+CORS(app)
 
 # ─── DIMENSÕES ───────────────────────────────────────────────────────────────
 W, H = 1080, 1350
