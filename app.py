@@ -200,7 +200,7 @@ def slide_capa(data):
     sub = data.get("subtitulo", "")
 
     tag_h    = int(font(True, 30).getbbox("A")[3] * 1.5) + 20 if tag else 0
-    titulo_h = measure_rich(titulo, 96, 96, max_w)
+    titulo_h = measure_rich(titulo, 80, 80, max_w)
     sub_h    = measure_rich(sub, 44, 44, max_w) + 50 if sub else 0
 
     total_h = tag_h + titulo_h + sub_h
@@ -213,7 +213,7 @@ def slide_capa(data):
         cy += tag_h
 
     cy = draw_rich_text(draw, titulo, pad, cy,
-                        size_reg=96, size_bold=96,
+                        size_reg=80, size_bold=80,
                         color_reg=tc, color_bold=tc,
                         max_w=max_w, center=True)
 
