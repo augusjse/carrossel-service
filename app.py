@@ -183,15 +183,21 @@ def slide_capa(data):
                 alpha = int(min(215, (yy / H) * 270))
                 d.line([(0, yy), (W, yy)], fill=(0, 0, 0, alpha))
             img = Image.alpha_composite(img, ov).convert("RGB")
+            tc = (255, 255, 255)
+            ts = (210, 210, 210)
+            acc = (255, 200, 80)
         except:
-            img = Image.new("RGB", (W, H), BG_CAPA)
+            img = load_template()
+            tc = (20, 20, 20)
+            ts = (80, 80, 80)
+            acc = ACCENT
     else:
-        img = Image.new("RGB", (W, H), BG_CAPA)
+        img = load_template()
+        tc = (20, 20, 20)
+        ts = (80, 80, 80)
+        acc = ACCENT
 
     draw = ImageDraw.Draw(img)
-    tc = (255, 255, 255)
-    ts = (210, 210, 210)
-    acc = (255, 200, 80) if imagem_url else ACCENT
     pad = TEXT_ZONE_LEFT
     max_w = W - pad * 2
 
@@ -227,7 +233,7 @@ def slide_capa(data):
     if handle:
         f = font(False, 30)
         bw = draw.textbbox((0, 0), handle, font=f)[2]
-        draw.text((W // 2 - bw // 2, H - 80), handle, font=f, fill=(180, 180, 180))
+        draw.text((W // 2 - bw // 2, H - 80), handle, font=f, fill=(160, 160, 160))
 
     return img
 
