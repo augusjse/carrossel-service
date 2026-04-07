@@ -71,7 +71,7 @@ def draw_rich_text(draw, text, x, y, size_reg=52, size_bold=52,
     if color_bold is None: color_bold = TEXT_DARK
     if max_w      is None: max_w      = TEXT_ZONE_RIGHT - x
 
-    line_h = int(font(False, size_reg).getbbox("A")[3] * 1.55)
+    line_h = int(font(False, size_reg).getbbox("A")[3] * 1.2)
     cy = y
 
     for para in text.split("\n"):
@@ -219,7 +219,7 @@ def slide_capa(data):
 
     # Desenha título
     cy = draw_rich_text(draw, titulo, pad, cy,
-                        size_reg=82, size_bold=82,
+                        size_reg=96, size_bold=96,,
                         color_reg=tc, color_bold=tc,
                         max_w=max_w, center=True)
 
