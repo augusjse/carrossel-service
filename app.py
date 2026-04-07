@@ -29,7 +29,7 @@ BG_CAPA      = (15, 15, 15)
 # O template tem header ~160px e rodapé ~170px
 TEXT_ZONE_TOP    = 290   # onde o texto começa
 TEXT_ZONE_BOTTOM = 1170  # onde o texto termina (antes do handle)
-TEXT_ZONE_LEFT   = 80
+TEXT_ZONE_LEFT   = 100
 TEXT_ZONE_RIGHT  = W - 80
 
 # ─── TEMPLATE BASE ───────────────────────────────────────────────────────────
