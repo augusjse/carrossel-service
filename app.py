@@ -156,30 +156,79 @@ def slide_capa(data):
         img = Image.new("RGB", (W, H), BG_CAPA)
 
     draw = ImageDraw.Draw(img)
-    inv = True
-    tc = (255,255,255); ts = (210,210,210); acc = (255,200,80) if imagem_url else ACCENT
+    tc = (255,255,255); ts = (210,210,210)
+    acc = (255,200,80) if imagem_url else ACCENT
+    pad = TEXT_ZONE_LEFT
+    max_w = W - pad * 2
 
+    # Mede altura total do bloco para centralizar verticalmente
     tag = data.get("tag","").upper()
+    titulo = data.get("titulo","")
+    sub = data.get("subtitulo","")
+
+    def measure_rich(text, size_reg, size_bold):
+        if not text: return 0
+        dummy = Image.new("RGB", (1,1))
+        dd = ImageDraw.Draw(dummy)
+        line_h = int(font(False, size_reg).getbbox("A")[3] * 1.55)
+        total = 0
+        for para in text.split("\n"):
+            if para.strip() == "":
+                total += int(line_h * 0.55)
+                continue
+            tokens = []
+            rem = para
+            while "**" in rem:
+                idx = rem.index("**")
+                if idx > 0: tokens.append((rem[:idx], False))
+                rem = rem[idx+2:]
+                end = rem.index("**") if "**" in rem else len(rem)
+                tokens.append((rem[:end], True))
+                rem = rem[end+2:] if "**" in rem else ""
+            if rem: tokens.append((rem, False))
+            if not tokens: tokens = [(para, False)]
+            words = []
+            for txt, bold in tokens:
+                for w in txt.split(" "):
+                    if w: words.append((w, bold))
+            lines, cur, cw = [], [], 0
+            for word, bold in words:
+                f = font(bold, size_bold if bold else size_reg)
+                bw = dd.textbbox((0,0), word+" ", font=f)[2]
+                if cw + bw > max_w and cur:
+                    lines.append(cur); cur = [(word,bold)]; cw = bw
+                else:
+                    cur.append((word,bold)); cw += bw
+            if cur: lines.append(cur)
+            total += len(lines) * line_h + int(line_h * 0.1)
+        return total
+
+    tag_h    = int(font(True,30).getbbox("A")[3] * 1.5) + 20 if tag else 0
+    titulo_h = measure_rich(titulo, 82, 82)
+    sub_h    = measure_rich(sub, 44, 44) + 50 if sub else 0
+
+    total_h = tag_h + titulo_h + sub_h
+    cy = (H - total_h) // 2
+
+    # Desenha tag
     if tag:
         f_tag = font(True, 30)
         tag_w = draw.textbbox((0,0), tag, font=f_tag)[2]
-        draw.text((W//2 - tag_w//2, 130), tag, font=f_tag, fill=acc)
+        draw.text((W//2 - tag_w//2, cy), tag, font=f_tag, fill=acc)
+        cy += tag_h
 
-    y = draw_rich_text(draw, data.get("titulo",""),
-                       TEXT_ZONE_LEFT, 230,
-                       size_reg=82, size_bold=82,
-                       color_reg=tc, color_bold=tc,
-                       max_w=W - TEXT_ZONE_LEFT*2,
-                       center=True)
+    # Desenha título
+    cy = draw_rich_text(draw, titulo, pad, cy,
+                        size_reg=82, size_bold=82,
+                        color_reg=tc, color_bold=tc,
+                        max_w=max_w, center=True)
 
-    sub = data.get("subtitulo","")
+    # Desenha subtítulo
     if sub:
-        draw_rich_text(draw, sub,
-                       TEXT_ZONE_LEFT, y+50,
+        draw_rich_text(draw, sub, pad, cy + 50,
                        size_reg=44, size_bold=44,
                        color_reg=ts, color_bold=ts,
-                       max_w=W - TEXT_ZONE_LEFT*2,
-                       center=True)
+                       max_w=max_w, center=True)
 
     # Handle
     handle = data.get("handle","")
