@@ -1,289 +1,229 @@
 from flask import Flask, request, jsonify, send_file
-from PIL import Image, ImageDraw, ImageFont
 from flask_cors import CORS
-import io, zipfile, os
+from playwright.sync_api import sync_playwright
+import io, zipfile, os, base64, re
 import requests as http_requests
-import unicodedata
-
-def is_emoji(text):
-    return any(unicodedata.category(c) in ('So', 'Sm') or ord(c) > 0x2600 for c in text)
 
 app = Flask(__name__)
 CORS(app)
 
 W, H = 1080, 1350
-FONT_PATH = "/usr/share/fonts/truetype/poppins/"
-
-def font(bold=False, size=48):
-    name = "Poppins-ExtraBold.ttf" if bold else "Poppins-Regular.ttf"
-    try:
-        return ImageFont.truetype(os.path.join(FONT_PATH, name), size)
-    except:
-        return ImageFont.load_default()
-
-EMOJI_FONT_PATH = "/usr/share/fonts/truetype/poppins/NotoEmoji-Regular.ttf"
-
-def font_emoji(size=48):
-    try:
-        return ImageFont.truetype(EMOJI_FONT_PATH, size)
-    except:
-        return ImageFont.load_default()
-
-TEXT_DARK    = (20, 20, 20)
-TEXT_REGULAR = (50, 50, 50)
-TEXT_MUTED   = (160, 160, 160)
-ACCENT       = (180, 145, 60)
-BG_CAPA      = (255, 255, 255)
-
-TEXT_ZONE_TOP    = 290
-TEXT_ZONE_BOTTOM = 1170
-TEXT_ZONE_LEFT   = 100
-TEXT_ZONE_RIGHT  = W - 80
-
 TEMPLATE_PATH = os.path.join(os.path.dirname(__file__), "template.jpg")
 
-def load_template(url=None):
-    if url and url.strip():
-        try:
-            resp = http_requests.get(url.strip(), timeout=10)
-            resp.raise_for_status()
-            img = Image.open(io.BytesIO(resp.content)).convert("RGB")
-            return img.resize((W, H), Image.LANCZOS)
-        except:
-            pass
-    if os.path.exists(TEMPLATE_PATH):
-        return Image.open(TEMPLATE_PATH).convert("RGB").resize((W, H), Image.LANCZOS)
-    return Image.new("RGB", (W, H), (255, 255, 255))
+# ─── HELPERS ─────────────────────────────────────────────────────────────────
 
-def line_width(draw, parts, size_reg, size_bold):
-    total = 0
-    for word, bold in parts:
-        f = font(bold, size_bold if bold else size_reg)
-        total += draw.textbbox((0, 0), word + " ", font=f)[2]
-    return total
+def load_image_as_base64(path):
+    if os.path.exists(path):
+        with open(path, "rb") as f:
+            data = base64.b64encode(f.read()).decode()
+        ext = path.split(".")[-1].lower()
+        mime = "image/jpeg" if ext in ("jpg","jpeg") else "image/png"
+        return f"data:{mime};base64,{data}"
+    return None
 
-def draw_rich_text(draw, text, x, y, size_reg=52, size_bold=52,
-                   color_reg=None, color_bold=None, max_w=None, center=False):
-    if color_reg is None:
-        color_reg = TEXT_REGULAR
-    if color_bold is None:
-        color_bold = TEXT_DARK
-    if max_w is None:
-        max_w = TEXT_ZONE_RIGHT - x
+def fetch_image_as_base64(url):
+    try:
+        resp = http_requests.get(url.strip(), timeout=10)
+        resp.raise_for_status()
+        ct = resp.headers.get("content-type","image/jpeg").split(";")[0]
+        data = base64.b64encode(resp.content).decode()
+        return f"data:{ct};base64,{data}"
+    except:
+        return None
 
+def parse_rich(text):
+    """Converte **bold** em <strong> e \n em <br>."""
     text = text.replace("\\n", "\n")
-    line_h = int(font(False, size_reg).getbbox("A")[3] * 1.2)
-    cy = y
+    text = re.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', text)
+    text = text.replace("\n", "<br>")
+    return text
 
-    for para in text.split("\n"):
-        if para.strip() == "":
-            cy += int(line_h * 0.55)
-            continue
+# ─── HTML TEMPLATES ──────────────────────────────────────────────────────────
 
-        tokens = []
-        rem = para
-        while "**" in rem:
-            idx = rem.index("**")
-            if idx > 0:
-                tokens.append((rem[:idx], False))
-            rem = rem[idx + 2:]
-            end = rem.index("**") if "**" in rem else len(rem)
-            tokens.append((rem[:end], True))
-            rem = rem[end + 2:] if "**" in rem else ""
-        if rem:
-            tokens.append((rem, False))
-        if not tokens:
-            tokens = [(para, False)]
-
-        words = []
-        for txt, bold in tokens:
-            for w in txt.split(" "):
-                if w:
-                    words.append((w, bold))
-
-        lines, cur, cw = [], [], 0
-        for word, bold in words:
-            f = font(bold, size_bold if bold else size_reg)
-            bw = draw.textbbox((0, 0), word + " ", font=f)[2]
-            if cw + bw > max_w and cur:
-                lines.append(cur)
-                cur = [(word, bold)]
-                cw = bw
-            else:
-                cur.append((word, bold))
-                cw += bw
-        if cur:
-            lines.append(cur)
-
-        for line in lines:
-            lw = line_width(draw, line, size_reg, size_bold)
-            cx = x + (max_w - lw) // 2 if center else x
-            for word, bold in line:
-                f = font(bold, size_bold if bold else size_reg)
-                color = color_bold if bold else color_reg
-                if is_emoji(word):
-                    draw.text((cx, cy), word + " ", font=font_emoji(int((size_bold if bold else size_reg) * 1.3)), fill=color)
-                else:
-                    draw.text((cx, cy), word + " ", font=f, fill=color)
-                cx += draw.textbbox((0, 0), word + " ", font=f)[2]
-            cy += line_h
-        cy += int(line_h * 0.1)
-
-    return cy
-
-def measure_rich(text, size_reg, size_bold, max_w):
-    if not text:
-        return 0
-    text = text.replace("\\n", "\n")
-    dummy = Image.new("RGB", (1, 1))
-    dd = ImageDraw.Draw(dummy)
-    line_h = int(font(False, size_reg).getbbox("A")[3] * 1.2)
-    total = 0
-    for para in text.split("\n"):
-        if para.strip() == "":
-            total += int(line_h * 0.55)
-            continue
-        tokens = []
-        rem = para
-        while "**" in rem:
-            idx = rem.index("**")
-            if idx > 0:
-                tokens.append((rem[:idx], False))
-            rem = rem[idx + 2:]
-            end = rem.index("**") if "**" in rem else len(rem)
-            tokens.append((rem[:end], True))
-            rem = rem[end + 2:] if "**" in rem else ""
-        if rem:
-            tokens.append((rem, False))
-        if not tokens:
-            tokens = [(para, False)]
-        words = []
-        for txt, bold in tokens:
-            for w in txt.split(" "):
-                if w:
-                    words.append((w, bold))
-        lines, cur, cw = [], [], 0
-        for word, bold in words:
-            f = font(bold, size_bold if bold else size_reg)
-            bw = dd.textbbox((0, 0), word + " ", font=f)[2]
-            if cw + bw > max_w and cur:
-                lines.append(cur)
-                cur = [(word, bold)]
-                cw = bw
-            else:
-                cur.append((word, bold))
-                cw += bw
-        if cur:
-            lines.append(cur)
-        total += len(lines) * line_h + int(line_h * 0.1)
-    return total
-
-def slide_capa(data):
+def html_capa(data, template_b64):
     imagem_url = data.get("imagem_url", "").strip()
+    tag        = data.get("tag", "").upper()
+    titulo     = parse_rich(data.get("titulo", ""))
+    sub        = data.get("subtitulo", "")
+    handle     = data.get("handle", "")
 
+    # Decide fundo e cores
     if imagem_url:
-        try:
-            resp = http_requests.get(imagem_url, timeout=10)
-            resp.raise_for_status()
-            bg = Image.open(io.BytesIO(resp.content)).convert("RGBA")
-            ratio = max(W / bg.width, H / bg.height)
-            nw, nh = int(bg.width * ratio), int(bg.height * ratio)
-            bg = bg.resize((nw, nh), Image.LANCZOS)
-            l, t = (nw - W) // 2, (nh - H) // 2
-            bg = bg.crop((l, t, l + W, t + H))
-            img = bg.convert("RGBA")
-            ov = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-            d = ImageDraw.Draw(ov)
-            for yy in range(H):
-                alpha = int(min(215, (yy / H) * 270))
-                d.line([(0, yy), (W, yy)], fill=(0, 0, 0, alpha))
-            img = Image.alpha_composite(img, ov).convert("RGB")
-            tc = (255, 255, 255)
-            ts = (210, 210, 210)
-            acc = (255, 200, 80)
-        except:
-            img = load_template()
-            tc = (20, 20, 20)
-            ts = (80, 80, 80)
-            acc = ACCENT
-    else:
-        img = load_template()
-        tc = (20, 20, 20)
-        ts = (80, 80, 80)
-        acc = ACCENT
+        img_b64 = fetch_image_as_base64(imagem_url)
+        if img_b64:
+            bg_css = f"background-image: url('{img_b64}'); background-size: cover; background-position: center;"
+            overlay = """
+                <div style="position:absolute;inset:0;
+                    background: linear-gradient(to bottom,
+                        rgba(0,0,0,0.0) 0%,
+                        rgba(0,0,0,0.55) 50%,
+                        rgba(0,0,0,0.82) 100%);
+                    z-index:1"></div>
+            """
+            text_color = "#ffffff"
+            sub_color  = "rgba(255,255,255,0.80)"
+            acc_color  = "#ffc850"
+            handle_color = "rgba(255,255,255,0.55)"
+            position_css = "justify-content: flex-end; padding-bottom: 200px;"
+        else:
+            img_b64 = None
+    
+    if not imagem_url or not img_b64 if imagem_url else True:
+        if template_b64:
+            bg_css = f"background-image: url('{template_b64}'); background-size: cover; background-position: center;"
+        else:
+            bg_css = "background: #ffffff;"
+        overlay = ""
+        text_color = "#141414"
+        sub_color  = "#444444"
+        acc_color  = "#b4913c"
+        handle_color = "#aaaaaa"
+        position_css = "justify-content: center;"
 
-    draw = ImageDraw.Draw(img)
-    pad = TEXT_ZONE_LEFT
-    max_w = W - pad * 2
+    tag_html = f'<div style="font-size:30px;font-weight:800;color:{acc_color};letter-spacing:0.08em;margin-bottom:20px">{tag}</div>' if tag else ""
+    sub_html = f'<div style="font-size:44px;font-weight:400;color:{sub_color};margin-top:40px;line-height:1.4">{parse_rich(sub)}</div>' if sub else ""
+    handle_html = f'<div style="position:absolute;bottom:70px;left:0;right:0;text-align:center;font-size:30px;color:{handle_color};z-index:10">{handle}</div>' if handle else ""
 
-    tag = data.get("tag", "").upper()
-    titulo = data.get("titulo", "")
-    sub = data.get("subtitulo", "")
+    return f"""<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;700;800&display=swap" rel="stylesheet">
+<style>
+* {{ margin:0; padding:0; box-sizing:border-box; }}
+body {{ width:{W}px; height:{H}px; overflow:hidden; font-family:'Poppins',sans-serif; }}
+.slide {{
+    width:{W}px; height:{H}px;
+    position:relative;
+    {bg_css}
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    {position_css}
+}}
+.content {{
+    position:relative;
+    z-index:10;
+    width:100%;
+    padding:0 100px;
+    text-align:center;
+}}
+.titulo {{
+    font-size:80px;
+    font-weight:800;
+    color:{text_color};
+    line-height:1.15;
+}}
+</style>
+</head>
+<body>
+<div class="slide">
+    {overlay}
+    <div class="content">
+        {tag_html}
+        <div class="titulo">{titulo}</div>
+        {sub_html}
+    </div>
+    {handle_html}
+</div>
+</body>
+</html>"""
 
-    tag_h    = int(font(True, 30).getbbox("A")[3] * 1.5) + 20 if tag else 0
-    titulo_h = measure_rich(titulo, 80, 80, max_w)
-    sub_h    = measure_rich(sub, 44, 44, max_w) + 50 if sub else 0
 
-    total_h = tag_h + titulo_h + sub_h
-    cy = (H - total_h) // 2 if not imagem_url else H - total_h - 200
-
-    if tag:
-        f_tag = font(True, 30)
-        tag_w = draw.textbbox((0, 0), tag, font=f_tag)[2]
-        draw.text((W // 2 - tag_w // 2, cy), tag, font=f_tag, fill=acc)
-        cy += tag_h
-
-    cy = draw_rich_text(draw, titulo, pad, cy,
-                        size_reg=80, size_bold=80,
-                        color_reg=tc, color_bold=tc,
-                        max_w=max_w, center=True)
-
-    if sub:
-        draw_rich_text(draw, sub, pad, cy + 50,
-                       size_reg=44, size_bold=44,
-                       color_reg=ts, color_bold=ts,
-                       max_w=max_w, center=True)
-
+def html_conteudo(data, template_b64):
+    texto  = parse_rich(data.get("texto", ""))
     handle = data.get("handle", "")
-    if handle:
-        f = font(False, 30)
-        bw = draw.textbbox((0, 0), handle, font=f)[2]
-        draw.text((W // 2 - bw // 2, H - 80), handle, font=f, fill=(160, 160, 160))
 
-    return img
+    if template_b64:
+        bg_css = f"background-image: url('{template_b64}'); background-size: cover; background-position: center;"
+    else:
+        bg_css = "background: #ffffff;"
 
-def slide_conteudo(data):
-    img = load_template(data.get("layout_url", ""))
-    draw = ImageDraw.Draw(img)
-    texto = data.get("texto", "")
-    zone_h = TEXT_ZONE_BOTTOM - TEXT_ZONE_TOP
-    text_h = measure_rich(texto, 52, 52, TEXT_ZONE_RIGHT - TEXT_ZONE_LEFT)
-    y = TEXT_ZONE_TOP + (zone_h - text_h) // 2
-    draw_rich_text(draw, texto,
-                   TEXT_ZONE_LEFT, y,
-                   size_reg=52, size_bold=52,
-                   color_reg=TEXT_REGULAR, color_bold=TEXT_DARK,
-                   max_w=TEXT_ZONE_RIGHT - TEXT_ZONE_LEFT)
-    return img
+    handle_html = f'<div class="handle">{handle}</div>' if handle else ""
 
-def slide_cta(data):
-    img = load_template(data.get("layout_url", ""))
-    draw = ImageDraw.Draw(img)
-    texto = data.get("texto", "")
-    zone_h = TEXT_ZONE_BOTTOM - TEXT_ZONE_TOP
-    text_h = measure_rich(texto, 52, 52, TEXT_ZONE_RIGHT - TEXT_ZONE_LEFT)
-    y = TEXT_ZONE_TOP + (zone_h - text_h) // 2
-    draw_rich_text(draw, texto,
-                   TEXT_ZONE_LEFT, y,
-                   size_reg=52, size_bold=52,
-                   color_reg=TEXT_REGULAR, color_bold=TEXT_DARK,
-                   max_w=TEXT_ZONE_RIGHT - TEXT_ZONE_LEFT)
-    return img
+    # Zona de texto: top=290, bottom=1170 => height=880, center=730
+    return f"""<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;700;800&display=swap" rel="stylesheet">
+<style>
+* {{ margin:0; padding:0; box-sizing:border-box; }}
+body {{ width:{W}px; height:{H}px; overflow:hidden; font-family:'Poppins',sans-serif; }}
+.slide {{
+    width:{W}px; height:{H}px;
+    position:relative;
+    {bg_css}
+}}
+.zone {{
+    position:absolute;
+    top:290px;
+    bottom:180px;
+    left:100px;
+    right:80px;
+    display:flex;
+    align-items:center;
+}}
+.texto {{
+    font-size:52px;
+    font-weight:400;
+    color:#323232;
+    line-height:1.5;
+}}
+.texto strong {{
+    font-weight:800;
+    color:#141414;
+}}
+.handle {{
+    position:absolute;
+    bottom:70px;
+    left:0; right:0;
+    text-align:center;
+    font-size:28px;
+    color:#aaaaaa;
+}}
+</style>
+</head>
+<body>
+<div class="slide">
+    <div class="zone">
+        <div class="texto">{texto}</div>
+    </div>
+    {handle_html}
+</div>
+</body>
+</html>"""
 
-RENDERERS = {"capa": slide_capa, "conteudo": slide_conteudo, "cta": slide_cta}
 
-def render_slide(data):
-    return RENDERERS.get(data.get("tipo", "conteudo"), slide_conteudo)(data)
+RENDERERS_HTML = {
+    "capa":     html_capa,
+    "conteudo": html_conteudo,
+    "cta":      html_conteudo,
+}
+
+# ─── SCREENSHOT ──────────────────────────────────────────────────────────────
+
+_playwright = None
+_browser    = None
+
+def get_browser():
+    global _playwright, _browser
+    if _browser is None:
+        _playwright = sync_playwright().start()
+        _browser    = _playwright.chromium.launch(
+            args=["--no-sandbox","--disable-dev-shm-usage"]
+        )
+    return _browser
+
+def render_html_to_png(html):
+    browser = get_browser()
+    page    = browser.new_page(viewport={"width": W, "height": H})
+    page.set_content(html, wait_until="networkidle")
+    png = page.screenshot(clip={"x":0,"y":0,"width":W,"height":H})
+    page.close()
+    return png
+
+# ─── ENDPOINTS ───────────────────────────────────────────────────────────────
 
 @app.route("/health", methods=["GET"])
 def health():
@@ -294,20 +234,24 @@ def gerar():
     body = request.get_json()
     if not body or "slides" not in body:
         return jsonify({"erro": "Campo 'slides' obrigatório"}), 400
-    slides = body["slides"][:10]
-    handle = body.get("handle", "")
+
+    template_b64 = load_image_as_base64(TEMPLATE_PATH)
+    slides  = body["slides"][:10]
+    handle  = body.get("handle", "")
     for s in slides:
         if "handle" not in s:
             s["handle"] = handle
+
     zip_buf = io.BytesIO()
     with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
         for i, slide in enumerate(slides):
-            img = render_slide(slide)
-            buf = io.BytesIO()
-            img.save(buf, format="PNG", optimize=True)
-            buf.seek(0)
-            zf.writestr(f"slide_{i+1:02d}.png", buf.read())
+            tipo     = slide.get("tipo", "conteudo")
+            renderer = RENDERERS_HTML.get(tipo, html_conteudo)
+            html     = renderer(slide, template_b64)
+            png      = render_html_to_png(html)
+            zf.writestr(f"slide_{i+1:02d}.png", png)
     zip_buf.seek(0)
+
     return send_file(zip_buf, mimetype="application/zip",
                      as_attachment=True, download_name="carrossel.zip")
 
@@ -316,11 +260,12 @@ def slide_unico():
     body = request.get_json()
     if not body:
         return jsonify({"erro": "Body JSON obrigatório"}), 400
-    img = render_slide(body)
-    buf = io.BytesIO()
-    img.save(buf, format="PNG")
-    buf.seek(0)
-    return send_file(buf, mimetype="image/png")
+    template_b64 = load_image_as_base64(TEMPLATE_PATH)
+    tipo     = body.get("tipo", "conteudo")
+    renderer = RENDERERS_HTML.get(tipo, html_conteudo)
+    html     = renderer(body, template_b64)
+    png      = render_html_to_png(html)
+    return send_file(io.BytesIO(png), mimetype="image/png")
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=False)
