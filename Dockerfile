@@ -1,25 +1,26 @@
 FROM python:3.11-slim
 
+# Dependências do sistema para o Chromium
 RUN apt-get update && apt-get install -y \
-    fonts-dejavu-core \
-    fonts-dejavu-extra \
-    wget \
+    wget curl gnupg ca-certificates \
+    libglib2.0-0 libnss3 libnspr4 libdbus-1-3 \
+    libatk1.0-0 libatk-bridge2.0-0 libcups2 \
+    libdrm2 libxcb1 libxkbcommon0 libx11-6 \
+    libxcomposite1 libxdamage1 libxext6 \
+    libxfixes3 libxrandr2 libgbm1 libpango-1.0-0 \
+    libcairo2 libasound2 libatspi2.0-0 libxshmfence1 \
+    fonts-liberation fonts-noto-color-emoji \
     && rm -rf /var/lib/apt/lists/*
-
-RUN mkdir -p /usr/share/fonts/truetype/poppins && \
-    wget -q "https://github.com/google/fonts/raw/main/ofl/poppins/Poppins-Regular.ttf" -O /usr/share/fonts/truetype/poppins/Poppins-Regular.ttf && \
-    wget -q "https://github.com/google/fonts/raw/main/ofl/poppins/Poppins-Bold.ttf" -O /usr/share/fonts/truetype/poppins/Poppins-Bold.ttf && \
-    wget -q "https://github.com/google/fonts/raw/main/ofl/poppins/Poppins-SemiBold.ttf" -O /usr/share/fonts/truetype/poppins/Poppins-SemiBold.ttf && \
-    wget -q "https://github.com/google/fonts/raw/main/ofl/poppins/Poppins-ExtraBold.ttf" -O /usr/share/fonts/truetype/poppins/Poppins-ExtraBold.ttf
 
 WORKDIR /app
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
+RUN playwright install chromium
+RUN playwright install-deps chromium
 
 COPY app.py .
 COPY template.jpg .
-COPY NotoEmoji-Regular.ttf /usr/share/fonts/truetype/poppins/NotoEmoji-Regular.ttf
 
 EXPOSE 5000
 
