@@ -255,8 +255,12 @@ def slide_capa(data):
 def slide_conteudo(data):
     img = load_template(data.get("layout_url", ""))
     draw = ImageDraw.Draw(img)
-    draw_rich_text(draw, data.get("texto", ""),
-                   TEXT_ZONE_LEFT, TEXT_ZONE_TOP,
+    texto = data.get("texto", "")
+    zone_h = TEXT_ZONE_BOTTOM - TEXT_ZONE_TOP
+    text_h = measure_rich(texto, 52, 52, TEXT_ZONE_RIGHT - TEXT_ZONE_LEFT)
+    y = TEXT_ZONE_TOP + (zone_h - text_h) // 2
+    draw_rich_text(draw, texto,
+                   TEXT_ZONE_LEFT, y,
                    size_reg=52, size_bold=52,
                    color_reg=TEXT_REGULAR, color_bold=TEXT_DARK,
                    max_w=TEXT_ZONE_RIGHT - TEXT_ZONE_LEFT)
@@ -265,8 +269,12 @@ def slide_conteudo(data):
 def slide_cta(data):
     img = load_template(data.get("layout_url", ""))
     draw = ImageDraw.Draw(img)
-    draw_rich_text(draw, data.get("texto", ""),
-                   TEXT_ZONE_LEFT, TEXT_ZONE_TOP,
+    texto = data.get("texto", "")
+    zone_h = TEXT_ZONE_BOTTOM - TEXT_ZONE_TOP
+    text_h = measure_rich(texto, 52, 52, TEXT_ZONE_RIGHT - TEXT_ZONE_LEFT)
+    y = TEXT_ZONE_TOP + (zone_h - text_h) // 2
+    draw_rich_text(draw, texto,
+                   TEXT_ZONE_LEFT, y,
                    size_reg=52, size_bold=52,
                    color_reg=TEXT_REGULAR, color_bold=TEXT_DARK,
                    max_w=TEXT_ZONE_RIGHT - TEXT_ZONE_LEFT)
