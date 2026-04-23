@@ -3,6 +3,10 @@ from PIL import Image, ImageDraw, ImageFont
 from flask_cors import CORS
 import io, zipfile, os
 import requests as http_requests
+import unicodedata
+
+def is_emoji(text):
+    return any(unicodedata.category(c) in ('So', 'Sm') or ord(c) > 0x2600 for c in text)
 
 app = Flask(__name__)
 CORS(app)
@@ -14,6 +18,14 @@ def font(bold=False, size=48):
     name = "Poppins-ExtraBold.ttf" if bold else "Poppins-Regular.ttf"
     try:
         return ImageFont.truetype(os.path.join(FONT_PATH, name), size)
+    except:
+        return ImageFont.load_default()
+
+EMOJI_FONT_PATH = "/usr/share/fonts/truetype/poppins/NotoEmoji-Regular.ttf"
+
+def font_emoji(size=48):
+    try:
+        return ImageFont.truetype(EMOJI_FONT_PATH, size)
     except:
         return ImageFont.load_default()
 
@@ -109,7 +121,10 @@ def draw_rich_text(draw, text, x, y, size_reg=52, size_bold=52,
             for word, bold in line:
                 f = font(bold, size_bold if bold else size_reg)
                 color = color_bold if bold else color_reg
-                draw.text((cx, cy), word + " ", font=f, fill=color)
+                if is_emoji(word):
+                    draw.text((cx, cy), word + " ", font=font_emoji(size_bold if bold else size_reg), fill=color)
+                else:
+                    draw.text((cx, cy), word + " ", font=f, fill=color)
                 cx += draw.textbbox((0, 0), word + " ", font=f)[2]
             cy += line_h
         cy += int(line_h * 0.1)
