@@ -10,7 +10,8 @@ RUN mkdir -p /usr/share/fonts/truetype/poppins && \
     wget -q "https://github.com/google/fonts/raw/main/ofl/poppins/Poppins-Regular.ttf" -O /usr/share/fonts/truetype/poppins/Poppins-Regular.ttf && \
     wget -q "https://github.com/google/fonts/raw/main/ofl/poppins/Poppins-Bold.ttf" -O /usr/share/fonts/truetype/poppins/Poppins-Bold.ttf && \
     wget -q "https://github.com/google/fonts/raw/main/ofl/poppins/Poppins-SemiBold.ttf" -O /usr/share/fonts/truetype/poppins/Poppins-SemiBold.ttf && \
-    wget -q "https://github.com/google/fonts/raw/main/ofl/poppins/Poppins-ExtraBold.ttf" -O /usr/share/fonts/truetype/poppins/Poppins-ExtraBold.ttf
+    wget -q "https://github.com/google/fonts/raw/main/ofl/poppins/Poppins-ExtraBold.ttf" -O /usr/share/fonts/truetype/poppins/Poppins-ExtraBold.ttf && \
+    wget -q "https://github.com/googlefonts/noto-emoji/raw/main/fonts/NotoEmoji-Regular.ttf" -O /usr/share/fonts/truetype/poppins/NotoEmoji-Regular.ttf
 
 WORKDIR /app
 
