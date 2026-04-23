@@ -122,7 +122,7 @@ def draw_rich_text(draw, text, x, y, size_reg=52, size_bold=52,
                 f = font(bold, size_bold if bold else size_reg)
                 color = color_bold if bold else color_reg
                 if is_emoji(word):
-                    draw.text((cx, cy), word + " ", font=font_emoji(size_bold if bold else size_reg), fill=color)
+                    draw.text((cx, cy), word + " ", font=font_emoji(int((size_bold if bold else size_reg) * 1.3)), fill=color)
                 else:
                     draw.text((cx, cy), word + " ", font=f, fill=color)
                 cx += draw.textbbox((0, 0), word + " ", font=f)[2]
