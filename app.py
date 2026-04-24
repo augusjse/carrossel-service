@@ -203,24 +203,15 @@ RENDERERS_HTML = {
 
 # ─── SCREENSHOT ──────────────────────────────────────────────────────────────
 
-_playwright = None
-_browser    = None
-
-def get_browser():
-    global _playwright, _browser
-    if _browser is None:
-        _playwright = sync_playwright().start()
-        _browser    = _playwright.chromium.launch(
-            args=["--no-sandbox","--disable-dev-shm-usage"]
-        )
-    return _browser
-
 def render_html_to_png(html):
-    browser = get_browser()
-    page    = browser.new_page(viewport={"width": W, "height": H})
-    page.set_content(html, wait_until="networkidle")
-    png = page.screenshot(clip={"x":0,"y":0,"width":W,"height":H})
-    page.close()
+    with sync_playwright() as p:
+        browser = p.chromium.launch(
+            args=["--no-sandbox", "--disable-dev-shm-usage"]
+        )
+        page = browser.new_page(viewport={"width": W, "height": H})
+        page.set_content(html, wait_until="networkidle")
+        png = page.screenshot(clip={"x": 0, "y": 0, "width": W, "height": H})
+        browser.close()
     return png
 
 # ─── ENDPOINTS ───────────────────────────────────────────────────────────────
